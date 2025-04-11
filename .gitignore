@@ -172,3 +172,9 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+data/
+wandb/
+lightning_logs/
+data.zip
+归档.zip
