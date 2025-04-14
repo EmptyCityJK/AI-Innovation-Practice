@@ -12,8 +12,8 @@ parser = argparse.ArgumentParser(description='Course_for_OfficeHome')
 parser.add_argument('--backbone', type=str, default='resnet50')#resnext50_32x4d resnet50
 parser.add_argument('--hidden_dim', type=int, default=512) #分类头全连接层的神经元数量
 # 数据的基本参数
-parser.add_argument('--data_path', type=str, default="../")
-parser.add_argument('--fold_name', type=str, default="data")
+parser.add_argument('--data_path', type=str, default="../../autodl-tmp/")
+parser.add_argument('--fold_name', type=str, default="Real World")
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--class_num', type=int, default=65)
 parser.add_argument('--workers', type=int, default=8)
@@ -37,7 +37,6 @@ if __name__ == "__main__":
     root_dir = args.data_path
     fold_name = args.fold_name
     train_loader, val_loader, test_loader = dataloader.data_load(root_dir,fold_name,args.batch_size, args.workers)
-
     ##### 模型
     model = Model4Classifier(args).to(DEVICE)
     criterion = nn.CrossEntropyLoss().to(DEVICE)

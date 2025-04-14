@@ -8,19 +8,15 @@ class DInterface(pl.LightningDataModule):
         super().__init__()
         self.data_path = kwargs["data_path"]
         self.batch_size = kwargs["batch_size"]
-        self.image_size = kwargs["input_size"]
+        self.image_size = kwargs["image_size"]
         self.num_workers = kwargs["num_workers"]
         self.train_dataset = None
         self.val_dataset = None
         self.transform = transforms.Compose([
-            transforms.Resize(self.image_size),
+            transforms.Resize((224, 224)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                               std=[0.229, 0.224, 0.225])
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
-
-    def target_transform(label):
-        return torch.eye(65)[label]
     def setup(self, stage=None):
         """加载并初始化数据集"""
         full_dataset = datasets.ImageFolder(root=self.data_path, 

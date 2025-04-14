@@ -59,7 +59,7 @@ def data_load(root_path, dir, batch_size, numworker):
     print(f"训练集样本数: {len(train_dataset)}")
     print(f"验证集样本数: {len(val_dataset)}")
     print(f"测试集样本数: {len(test_dataset)}")
-
+    print(train_dataset[0].shape)
     # --- 步骤7：创建DataLoader ---
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=numworker)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=numworker)
@@ -76,13 +76,7 @@ class ApplyTransform(Subset):
         img, label = super().__getitem__(idx)
 
         # Check if the image is a tensor, and only apply the transform if it's a PIL Image or ndarray
-        if isinstance(img, torch.Tensor):
-            # If it's already a tensor, no need to apply ToTensor again, just return the image
-            if self.transform:
-                # Apply the transformation that expects a tensor (e.g., Normalize)
-                img = self.transform(img)
-        else:
-            # Apply transform if the image is not a tensor
+        if not isinstance(img, torch.Tensor):
             if self.transform:
                 img = self.transform(img)
 
