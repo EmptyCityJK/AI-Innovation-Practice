@@ -38,7 +38,7 @@ if __name__ == '__main__':
     parser.add_argument("--num_workers", type=int, default=16, help="Number of workers for data loaders")
     parser.add_argument("--learning_rate", type=float, default=0.001, help="Learning rate for the optimizer")
     parser.add_argument("--epochs", type=int, default=5000, help="Number of training epochs")
-    parser.add_argument("--model_name", type=str, default="DCGAN", help="Name of the model to train")
+    parser.add_argument("--model_name", type=str, default="ResNet", help="Name of the model to train")
     parser.add_argument("--mode", type=str, default="train", help="Mode to run the script in: train or predict")
     # parser.add_argument("--checkpoint_path", type=str, default="", help="Path to the model checkpoint for predictions")
 

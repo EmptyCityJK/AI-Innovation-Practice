@@ -179,4 +179,5 @@ lightning_logs/
 data.zip
 归档.zip
 RealWorldClassification/
-cankao/
+test/
+cankao/best_model.pth
