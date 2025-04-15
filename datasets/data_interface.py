@@ -1,6 +1,7 @@
 import pytorch_lightning as pl
 import torch
-from torch.utils.data import DataLoader, random_split
+import numpy as np
+from torch.utils.data import DataLoader, random_split, Subset
 from torchvision import transforms, datasets
 from .transforms import Transforms
 
@@ -15,22 +16,14 @@ class DInterface(pl.LightningDataModule):
         self.train_dataset = None
         self.val_dataset = None
         self.base_transform =  Transforms.get_base_transform()  # 使用统一的基础转换
+    
     def setup(self, stage=None):
         """加载并初始化数据集"""
+        # 加载原始数据集（仅应用基础转换）
         full_dataset = datasets.ImageFolder(
-            root=self.data_path, 
+            root=self.data_path,
             transform=self.base_transform
         )
-        # 划分训练(70%)/验证(15%)/测试(15%)
-        train_size = int(0.7 * len(full_dataset))
-        val_size = int(0.15 * len(full_dataset))
-        test_size = len(full_dataset) - train_size - val_size
-        
-        train_subset, val_subset, test_subset = random_split(
-            full_dataset, 
-            [train_size, val_size, test_size]
-        )
-        
         # 根据类型选择增强策略
         if self.aug_type == "light":
             train_transform = Transforms.get_light_augment_transform(self.image_size)
@@ -38,11 +31,40 @@ class DInterface(pl.LightningDataModule):
             train_transform = Transforms.get_strong_augment_transform(self.image_size)
         else:  # 默认
             train_transform = Transforms.get_default_train_transform(self.image_size)
+        val_test_transform = Transforms.get_val_test_transform(self.image_size)
+        # 按类别划分索引
+        class_indices = {}
+        for idx, (_, label) in enumerate(full_dataset):
+            if label not in class_indices:
+                class_indices[label] = []
+            class_indices[label].append(idx)
+        
+        # 对每个类别按比例分割 (60%训练，20%验证，20%测试)
+        train_indices, val_indices, test_indices = [], [], []
+        for label, indices in class_indices.items():
+            np.random.seed(42)  # 固定随机种子
+            np.random.shuffle(indices)
+            n = len(indices)
+            train_end = int(0.6 * n)
+            val_end = train_end + int(0.2 * n)
             
-        # 应用转换
-        self.train_dataset = ApplyTransform(train_subset, train_transform)
-        self.val_dataset = ApplyTransform(val_subset, Transforms.get_val_test_transform(self.image_size))
-        self.test_dataset = ApplyTransform(test_subset, Transforms.get_val_test_transform(self.image_size))
+            train_indices.extend(indices[:train_end])
+            val_indices.extend(indices[train_end:val_end])
+            test_indices.extend(indices[val_end:])
+        
+        # 创建应用了不同transform的Subset
+        self.train_dataset = ApplyTransform(
+            Subset(full_dataset, train_indices),
+            train_transform
+        )
+        self.val_dataset = ApplyTransform(
+            Subset(full_dataset, val_indices),
+            val_test_transform
+        )
+        self.test_dataset = ApplyTransform(
+            Subset(full_dataset, test_indices),
+            val_test_transform
+        )
 
     def train_dataloader(self):
         """返回训练数据的 DataLoader"""
@@ -50,7 +72,6 @@ class DInterface(pl.LightningDataModule):
                           batch_size=self.batch_size, 
                           shuffle=True, 
                           num_workers=self.num_workers)
-
     def val_dataloader(self):
         """返回验证数据的 DataLoader"""
         return DataLoader(self.val_dataset, 
@@ -58,8 +79,8 @@ class DInterface(pl.LightningDataModule):
                           shuffle=False, 
                           num_workers=self.num_workers,
                           persistent_workers=True)
-    
     def test_dataloader(self):
+        """返回测试数据的 DataLoader"""
         return DataLoader(self.test_dataset, 
                           batch_size=self.batch_size, 
                           shuffle=False, 

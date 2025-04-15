@@ -14,9 +14,9 @@ parser.add_argument('--hidden_dim', type=int, default=512) #分类头全连接�
 # 数据的基本参数
 parser.add_argument('--data_path', type=str, default="../../autodl-tmp/")
 parser.add_argument('--fold_name', type=str, default="Real World")
-parser.add_argument('--batch_size', type=int, default=32)
+parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--class_num', type=int, default=65)
-parser.add_argument('--workers', type=int, default=8)
+parser.add_argument('--workers', type=int, default=16)
 # 训练阶段的基本参数
 parser.add_argument('--epochs', type=int, default=100)
 parser.add_argument('--iters_per_epoch', type=int, default=1000)
@@ -37,6 +37,7 @@ if __name__ == "__main__":
     root_dir = args.data_path
     fold_name = args.fold_name
     train_loader, val_loader, test_loader = dataloader.data_load(root_dir,fold_name,args.batch_size, args.workers)
+
     ##### 模型
     model = Model4Classifier(args).to(DEVICE)
     criterion = nn.CrossEntropyLoss().to(DEVICE)
