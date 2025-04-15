@@ -32,12 +32,12 @@ class DInterface(pl.LightningDataModule):
         
         # 根据类型选择增强策略
         if self.aug_type == "light":
-            self.train_transform = Transforms.get_light_augment_transform(self.image_size)
+            train_transform = Transforms.get_light_augment_transform(self.image_size)
         elif self.aug_type == "strong":
-            self.train_transform = Transforms.get_strong_augment_transform(self.image_size)
+            train_transform = Transforms.get_strong_augment_transform(self.image_size)
         else:  # 默认
-            self.train_transform = Transforms.get_default_train_transform(self.image_size)
-        self.val_test_transform = Transforms.get_val_test_transform(self.image_size)
+            train_transform = Transforms.get_default_train_transform(self.image_size)
+        val_test_transform = Transforms.get_val_test_transform(self.image_size)
 
     def setup(self, stage=None):
         """加载并初始化数据集"""

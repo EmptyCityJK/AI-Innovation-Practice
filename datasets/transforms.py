@@ -3,15 +3,10 @@ from typing import Optional, Dict
 
 class Transforms:
     """可扩展的数据增强策略工厂"""
-    def get_base_transform():
-        """基础转换：仅调整尺寸"""
-        return transforms.Compose([
-            transforms.Resize(256)  # 短边缩放到256，保持长宽比
-        ])
-
     def get_default_train_transform(image_size=224):
         """默认训练集增强：基础裁剪+翻转"""
         return transforms.Compose([
+            transforms.Resize(256),
             transforms.RandomResizedCrop(image_size, scale=(0.8, 1.0)),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
@@ -22,6 +17,7 @@ class Transforms:
     def get_light_augment_transform(image_size=224):
         """轻度增强：颜色扰动+基础几何变换"""
         return transforms.Compose([
+            transforms.Resize(256),
             transforms.RandomResizedCrop(image_size),
             transforms.RandomHorizontalFlip(),
             transforms.ColorJitter(brightness=0.2, contrast=0.2),
@@ -33,6 +29,7 @@ class Transforms:
     def get_strong_augment_transform(image_size=224):
         """强力增强：多种几何+颜色变换"""
         return transforms.Compose([
+            transforms.Resize(256),
             transforms.RandomResizedCrop(image_size, scale=(0.6, 1.0)),
             transforms.RandomHorizontalFlip(),
             transforms.RandomVerticalFlip(),

@@ -181,3 +181,4 @@ data.zip
 RealWorldClassification/
 test/
 cankao/best_model.pth
+checkpoints/
