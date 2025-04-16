@@ -18,7 +18,7 @@ parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--class_num', type=int, default=65)
 parser.add_argument('--workers', type=int, default=16)
 # 训练阶段的基本参数
-parser.add_argument('--epochs', type=int, default=100)
+parser.add_argument('--epochs', type=int, default=1000)
 parser.add_argument('--iters_per_epoch', type=int, default=1000)
 parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--lr_decay', type=float, default=1e-4)

@@ -8,6 +8,8 @@ from torchmetrics.classification import (
     F1Score
 )
 from .classifier import Model4Classifier
+from .EfficientnetV2 import efficientnetv2_s as EfficientNet
+from .SwinTransformer import swin_tiny_patch4_window7_224 as SwinTransformer
 
 class MInterface(LightningModule):
     def __init__(self, **kwargs):
@@ -43,8 +45,12 @@ class MInterface(LightningModule):
             "recall": Recall(**metric_args),
             "f1": F1Score(**metric_args)
         })
-
-        self.model = Model4Classifier(**kwargs)
+        if self.hparams.model_name == "ResNet":
+            self.model = Model4Classifier(**kwargs)
+        if self.hparams.model_name == "EfficientNet":
+            self.model = EfficientNet(num_classes=num_classes)
+        if self.hparams.model_name == "SwinTransformer":
+            self.model = SwinTransformer(num_classes=num_classes)
 
     def forward(self, x):
         return self.model(x)
@@ -54,6 +60,18 @@ class MInterface(LightningModule):
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
         y_pred = torch.argmax(y_hat, dim=1)
+
+        # 处理混合标签的损失计算
+        if stage == "train" and y.dim() == 2:  # one-hot格式
+            y_hat = self(x)
+            loss = torch.sum(-y * torch.log_softmax(y_hat, dim=1), dim=1).mean()
+            y_pred = torch.argmax(y_hat, dim=1)
+            y_true = torch.argmax(y, dim=1)  # 用于指标计算
+        else:
+            y_hat = self(x)
+            loss = self.criterion(y_hat, y)
+            y_pred = torch.argmax(y_hat, dim=1)
+            y_true = y
         
         metrics = getattr(self, f"{stage}_metrics")
         # 先记录loss和acc到进度条
@@ -66,7 +84,7 @@ class MInterface(LightningModule):
         )
         self.log(
             f"{stage}_acc",
-            metrics["acc"](y_pred, y),
+            metrics["acc"](y_pred, y_true),
             prog_bar=(stage != "test"),
             on_step=False,
             on_epoch=True
@@ -75,9 +93,9 @@ class MInterface(LightningModule):
         # 其他指标仅记录到日志不显示在进度条
         self.log_dict(
             {
-                f"{stage}_precision": metrics["precision"](y_pred, y),
-                f"{stage}_recall": metrics["recall"](y_pred, y),
-                f"{stage}_f1": metrics["f1"](y_pred, y)
+                f"{stage}_precision": metrics["precision"](y_pred, y_true),
+                f"{stage}_recall": metrics["recall"](y_pred, y_true),
+                f"{stage}_f1": metrics["f1"](y_pred, y_true)
             },
             prog_bar=False,  # 关闭进度条显示
             on_step=False,
@@ -95,7 +113,7 @@ class MInterface(LightningModule):
         return self._shared_step(batch, "test")
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(
+        optimizer = torch.optim.AdamW(
             self.parameters(),
             lr=self.hparams.learning_rate,
             weight_decay=self.hparams.weight_decay
@@ -104,7 +122,7 @@ class MInterface(LightningModule):
         if self.hparams.lr_scheduler:
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
-                T_max=self.hparams.epochs,
+                T_max=int(self.hparams.epochs*0.5),
                 eta_min=1e-5
             )
             return [optimizer], [scheduler]

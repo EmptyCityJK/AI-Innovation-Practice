@@ -19,6 +19,59 @@ class TransformDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.subset)
 
+class MixupCutmixTransform:
+    def __init__(self, alpha=1.0, cutmix_prob=0.5, num_classes=65):
+        """
+        alpha: mixup/cutmix的分布参数
+        cutmix_prob: 执行cutmix的概率（剩余概率执行mixup）
+        """
+        self.alpha = alpha
+        self.cutmix_prob = cutmix_prob
+        self.num_classes = num_classes
+        self.lambda_ = None
+        self.index = None
+
+    def _rand_bbox(self, size, lam):
+        """生成cutmix的边界框"""
+        W, H = size[2], size[3]
+        cx = np.random.randint(W)
+        cy = np.random.randint(H)
+        bbx1 = np.clip(cx - int(W * np.sqrt(1 - lam)) // 2, 0, W)
+        bby1 = np.clip(cy - int(H * np.sqrt(1 - lam)) // 2, 0, H)
+        bbx2 = np.clip(cx + int(W * np.sqrt(1 - lam)) // 2, 0, W)
+        bby2 = np.clip(cy + int(H * np.sqrt(1 - lam)) // 2, 0, H)
+        return bbx1, bby1, bbx2, bby2
+
+    def __call__(self, batch):
+        images, labels = batch  # 输入为整个batch的数据
+        batch_size = images.size(0)
+        
+        # 生成混合参数
+        lam = np.random.beta(self.alpha, self.alpha)
+        rand_index = torch.randperm(batch_size).to(images.device)
+        
+        # 生成one-hot标签
+        labels_onehot = torch.zeros(
+            batch_size, self.num_classes, 
+            device=images.device
+        ).scatter_(1, labels.unsqueeze(1), 1)
+        
+        # 随机选择mixup或cutmix
+        if np.random.rand() < self.cutmix_prob:
+            # CutMix
+            bbx1, bby1, bbx2, bby2 = self._rand_bbox(images.size(), lam)
+            images[:, :, bbx1:bbx2, bby1:bby2] = images[rand_index, :, bbx1:bbx2, bby1:bby2]
+            final_lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (images.size()[-1] * images.size()[-2]))
+        else:
+            # Mixup
+            final_lam = lam
+            images = images * final_lam + images[rand_index] * (1 - final_lam)
+        
+        # 混合标签
+        mixed_labels = labels_onehot * final_lam + labels_onehot[rand_index] * (1 - final_lam)
+        
+        return images, mixed_labels
+
 class DInterface(pl.LightningDataModule):
     def __init__(self, **kwargs):
         super().__init__()
@@ -38,6 +91,9 @@ class DInterface(pl.LightningDataModule):
         else:  # 默认
             self.train_transform = Transforms.get_default_train_transform(self.image_size)
         self.val_test_transform = Transforms.get_val_test_transform(self.image_size)
+        # 新增参数
+        self.mixup_alpha = kwargs.get("mixup_alpha", 0.0)  # 0表示禁用
+        self.cutmix_prob = kwargs.get("cutmix_prob", 0.5)
 
     def setup(self, stage=None):
         """加载并初始化数据集"""
@@ -91,8 +147,25 @@ class DInterface(pl.LightningDataModule):
                           batch_size=self.batch_size, 
                           shuffle=True, 
                           num_workers=self.num_workers,
-                          persistent_workers=True)
-
+                          # collate_fn=self._mixup_collate,
+                          persistent_workers=True,
+                          )
+    def _mixup_collate(self, batch):
+        # 原始数据加载
+        images = torch.stack([x[0] for x in batch])
+        labels = torch.tensor([x[1] for x in batch])
+        
+        # 应用mixup/cutmix
+        if self.mixup_alpha > 0 and self.training:  # 仅在训练时启用
+            transform = MixupCutmixTransform(
+                alpha=self.mixup_alpha,
+                cutmix_prob=self.cutmix_prob,
+                num_classes=self.num_classes  # 需要添加num_classes参数到数据模块
+            )
+            images, labels = transform((images, labels))
+            
+        return images, labels
+                          
     def val_dataloader(self):
         """返回验证数据的 DataLoader"""
         return DataLoader(self.val_subset, 

@@ -7,7 +7,7 @@ class Transforms:
         """默认训练集增强：基础裁剪+翻转"""
         return transforms.Compose([
             transforms.Resize(256),
-            transforms.RandomResizedCrop(image_size, scale=(0.8, 1.0)),
+            transforms.RandomResizedCrop(image_size),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], 
