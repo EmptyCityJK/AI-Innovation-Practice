@@ -57,10 +57,6 @@ class MInterface(LightningModule):
 
     def _shared_step(self, batch, stage):
         x, y = batch
-        y_hat = self(x)
-        loss = self.criterion(y_hat, y)
-        y_pred = torch.argmax(y_hat, dim=1)
-
         # 处理混合标签的损失计算
         if stage == "train" and y.dim() == 2:  # one-hot格式
             y_hat = self(x)

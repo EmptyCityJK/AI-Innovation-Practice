@@ -103,7 +103,7 @@ if __name__ == '__main__':
     parser.add_argument("--mode", type=str, default="train", help="Mode to run the script in: train or predict")
     parser.add_argument("--k_fold", type=int, default=0, help="Number of folds for k-fold cross-validation")
     parser.add_argument("--aug_type", type=str, default="light", help="Type of augmentation to use: default or light or strong")
-    parser.add_argument("--mixup_alpha", type=float, default=0.4, help="Mixup/Cutmix的alpha参数（0表示禁用）")
+    parser.add_argument("--mixup_alpha", type=float, default=0.0, help="Mixup/Cutmix的alpha参数（0表示禁用）")
     parser.add_argument("--cutmix_prob", type=float, default=0.5, help="执行Cutmix的概率（剩余概率使用Mixup）")
     # parser.add_argument("--checkpoint_path", type=str, default="", help="Path to the model checkpoint for predictions")
 

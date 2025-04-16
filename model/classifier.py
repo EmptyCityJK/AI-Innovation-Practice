@@ -10,7 +10,7 @@ class Model4Classifier(nn.Module):
         self.hidden_dim = kwargs['hidden_dim']
 
         # classifier
-        self.backbone = getattr(model.resnet, kwargs['backbone'])(pretrained=False)
+        self.backbone = getattr(model.resnet, kwargs['backbone'])(pretrained=True)
         self.classifier = nn.Sequential()
         # 全连接层1
         self.classifier.add_module('fc1',nn.Linear(2048, self.hidden_dim))
