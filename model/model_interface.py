@@ -8,8 +8,8 @@ from torchmetrics.classification import (
     F1Score
 )
 from .classifier import Model4Classifier
-from .EfficientnetV2 import efficientnetv2_s as EfficientNet
-from .SwinTransformer import swin_tiny_patch4_window7_224 as SwinTransformer
+from .AlexNet import AlexNet
+from .DeepDBC import ResNetDeepDBC
 
 class MInterface(LightningModule):
     def __init__(self, **kwargs):
@@ -26,6 +26,11 @@ class MInterface(LightningModule):
         
         self.criterion = nn.CrossEntropyLoss()
         self.train_metrics = nn.ModuleDict({
+            "micro_acc": Accuracy(
+                task = "multiclass",
+                num_classes = num_classes,
+                average = "micro"
+            ),
             "acc": Accuracy(**metric_args),
             "precision": Precision(**metric_args),
             "recall": Recall(**metric_args),
@@ -33,6 +38,11 @@ class MInterface(LightningModule):
         })
         
         self.val_metrics = nn.ModuleDict({
+            "micro_acc": Accuracy(
+                task = "multiclass",
+                num_classes = num_classes,
+                average = "micro"
+            ),
             "acc": Accuracy(**metric_args),
             "precision": Precision(**metric_args),
             "recall": Recall(**metric_args),
@@ -40,6 +50,11 @@ class MInterface(LightningModule):
         })
         
         self.test_metrics = nn.ModuleDict({
+            "micro_acc": Accuracy(
+                task = "multiclass",
+                num_classes = num_classes,
+                average = "micro"
+            ),
             "acc": Accuracy(**metric_args),
             "precision": Precision(**metric_args),
             "recall": Recall(**metric_args),
@@ -48,9 +63,16 @@ class MInterface(LightningModule):
         if self.hparams.model_name == "ResNet":
             self.model = Model4Classifier(**kwargs)
         if self.hparams.model_name == "EfficientNet":
-            self.model = EfficientNet(num_classes=num_classes)
+            self.model = Model4Classifier(**kwargs)
         if self.hparams.model_name == "SwinTransformer":
-            self.model = SwinTransformer(num_classes=num_classes)
+            self.model = Model4Classifier(**kwargs)
+        if self.hparams.model_name == "ConvNeXt":
+            self.model = Model4Classifier(**kwargs)
+
+        if self.hparams.model_name == "AlexNet":
+            self.model = AlexNet(num_classes=num_classes)
+        if self.hparams.model_name == "DeepDBC":
+            self.model = ResNetDeepDBC(**kwargs)
 
     def forward(self, x):
         return self.model(x)
@@ -89,11 +111,12 @@ class MInterface(LightningModule):
         # 其他指标仅记录到日志不显示在进度条
         self.log_dict(
             {
+                f"{stage}_micro_acc": metrics["micro_acc"](y_pred, y_true),
                 f"{stage}_precision": metrics["precision"](y_pred, y_true),
                 f"{stage}_recall": metrics["recall"](y_pred, y_true),
                 f"{stage}_f1": metrics["f1"](y_pred, y_true)
             },
-            prog_bar=False,  # 关闭进度条显示
+            prog_bar=False,
             on_step=False,
             on_epoch=True
         )
@@ -109,12 +132,11 @@ class MInterface(LightningModule):
         return self._shared_step(batch, "test")
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
+        optimizer = torch.optim.AdamW (
             self.parameters(),
             lr=self.hparams.learning_rate,
             weight_decay=self.hparams.weight_decay
         )
-        
         if self.hparams.lr_scheduler:
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,

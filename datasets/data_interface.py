@@ -79,6 +79,7 @@ class DInterface(pl.LightningDataModule):
         self.batch_size = kwargs["batch_size"]
         self.image_size = kwargs["image_size"]
         self.num_workers = kwargs["num_workers"]
+        self.num_classes = kwargs["class_num"]
         self.k_fold = kwargs.get("k_fold", 0)
         self.current_fold = kwargs.get("current_fold", 0)
         self.aug_type = kwargs.get("aug_type", "default")
@@ -126,7 +127,7 @@ class DInterface(pl.LightningDataModule):
             # 对每个类别按比例分割
             train_indices, val_indices, test_indices = [], [], []
             for label, indices in class_indices.items():
-                np.random.seed(42)  # 固定随机种子以确保可重复性
+                np.random.seed(42)
                 np.random.shuffle(indices)
                 n = len(indices)
                 train_end = int(0.6 * n)
@@ -149,6 +150,7 @@ class DInterface(pl.LightningDataModule):
                           num_workers=self.num_workers,
                           # collate_fn=self._mixup_collate,
                           persistent_workers=True,
+                          pin_memory=True
                           )
     def _mixup_collate(self, batch):
         # 原始数据加载
@@ -156,7 +158,7 @@ class DInterface(pl.LightningDataModule):
         labels = torch.tensor([x[1] for x in batch])
         
         # 应用mixup/cutmix
-        if self.mixup_alpha > 0 and self.training:  # 仅在训练时启用
+        if self.mixup_alpha > 0:
             transform = MixupCutmixTransform(
                 alpha=self.mixup_alpha,
                 cutmix_prob=self.cutmix_prob,
@@ -172,7 +174,8 @@ class DInterface(pl.LightningDataModule):
                           batch_size=self.batch_size, 
                           shuffle=False, 
                           num_workers=self.num_workers,
-                          persistent_workers=True)
+                          persistent_workers=True,
+                          pin_memory=True)
                           
     def test_dataloader(self):
         """返回测试数据的 DataLoader"""
@@ -180,4 +183,5 @@ class DInterface(pl.LightningDataModule):
                           batch_size=self.batch_size, 
                           shuffle=False, 
                           num_workers=self.num_workers,
-                          persistent_workers=True)
+                          persistent_workers=True,
+                          pin_memory=True)

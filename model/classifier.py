@@ -1,16 +1,24 @@
 import torch
 import torch.nn as nn
-import model.resnet
+from model.backbone import ResNet, ConvNeXt, EfficientNetV2, SwinTransformer
 
 class Model4Classifier(nn.Module):
-    # Resnet+MLP
     def __init__(self, **kwargs):
         super(Model4Classifier, self).__init__()
         self.class_num = kwargs['class_num']
         self.hidden_dim = kwargs['hidden_dim']
+        self.backbone_name = kwargs['backbone']
+        print(f"使用骨干网络: {self.backbone_name}")
+        if kwargs['model_name'] == 'ResNet':
+            self.backbone = getattr(ResNet, self.backbone_name)(pretrained=False, num_classes=self.class_num)
+        if kwargs['model_name'] == 'EfficientNetV2':
+            self.backbone = getattr(EfficientNetV2, self.backbone_name)(num_classes=self.class_num)
+        if kwargs['model_name'] == 'SwinTransformer':
+            self.backbone = getattr(SwinTransformer, self.backbone_name)(num_classes=self.class_num)
+        if kwargs['model_name'] == 'ConvNeXt':
+            self.backbone = getattr(ConvNeXt, self.backbone_name)(num_classes=self.class_num)
 
         # classifier
-        self.backbone = getattr(model.resnet, kwargs['backbone'])(pretrained=True)
         self.classifier = nn.Sequential()
         # 全连接层1
         self.classifier.add_module('fc1',nn.Linear(2048, self.hidden_dim))
@@ -20,11 +28,7 @@ class Model4Classifier(nn.Module):
         self.classifier.add_module('fc2',nn.Linear(self.hidden_dim,self.class_num))
 
     def forward(self, x):
-        feature_map = self.backbone(x)
-        output = self.classifier(feature_map)
-
+        output = self.backbone(x)
+        if self.backbone_name == 'ResNet':
+            output = self.classifier(output)
         return output
-
-
-
-
