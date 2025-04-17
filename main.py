@@ -109,9 +109,11 @@ if __name__ == '__main__':
     parser.add_argument("--learning_rate", type=float, default=0.001, help="Learning rate for the optimizer")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay for the optimizer")
     parser.add_argument("--lr_scheduler", type=bool, default=True, help="Use learning rate scheduler")
-    parser.add_argument("--epochs", type=int, default=500, help="Number of training epochs")
-    parser.add_argument('--backbone', type=str, default='vgg13', help='Backbone model to use')
-    parser.add_argument("--model_name", type=str, default="VGG", help="Name of the model to train")
+    
+    parser.add_argument("--epochs", type=int, default=170, help="Number of training epochs")
+    parser.add_argument('--backbone', type=str, default='efficientnetv2_s', help='Backbone model to use')
+    parser.add_argument("--model_name", type=str, default="EfficientNetV2", help="Name of the model to train")
+    
     parser.add_argument("--mode", type=str, default="train", help="Mode to run the script in: train or predict")
     parser.add_argument("--k_fold", type=int, default=0, help="Number of folds for k-fold cross-validation")
     parser.add_argument("--aug_type", type=str, default="default", help="Type of augmentation to use: default or light or strong")

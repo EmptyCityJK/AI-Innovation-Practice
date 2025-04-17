@@ -23,7 +23,7 @@ class MInterface(LightningModule):
         metric_args = {
             "task": "multiclass",
             "num_classes": num_classes,
-            "average": "macro"  # 可选'micro'/'weighted'
+            "average": "weighted"  # 可选'micro'/'macro'
         }
         self.train_metrics = nn.ModuleDict({
             "micro_acc": Accuracy(
@@ -62,7 +62,7 @@ class MInterface(LightningModule):
         })
         if self.hparams.model_name == "ResNet":
             self.model = Model4Classifier(**kwargs)
-        if self.hparams.model_name == "EfficientNet":
+        if self.hparams.model_name == "EfficientNetV2":
             self.model = Model4Classifier(**kwargs)
         if self.hparams.model_name == "SwinTransformer":
             self.model = Model4Classifier(**kwargs)
