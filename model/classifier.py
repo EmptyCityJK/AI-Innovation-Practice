@@ -8,9 +8,10 @@ class Model4Classifier(nn.Module):
         self.class_num = kwargs['class_num']
         self.hidden_dim = kwargs['hidden_dim']
         self.backbone_name = kwargs['backbone']
+        self.model_name = kwargs['model_name']
         print(f"使用骨干网络: {self.backbone_name}")
         if kwargs['model_name'] == 'ResNet':
-            self.backbone = getattr(ResNet, self.backbone_name)(pretrained=False, num_classes=self.class_num)
+            self.backbone = getattr(ResNet, self.backbone_name)(pretrained=True)
         if kwargs['model_name'] == 'EfficientNetV2':
             self.backbone = getattr(EfficientNetV2, self.backbone_name)(num_classes=self.class_num)
         if kwargs['model_name'] == 'SwinTransformer':
@@ -29,6 +30,6 @@ class Model4Classifier(nn.Module):
 
     def forward(self, x):
         output = self.backbone(x)
-        if self.backbone_name == 'ResNet':
+        if self.model_name == 'ResNet':
             output = self.classifier(output)
         return output

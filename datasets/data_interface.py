@@ -148,7 +148,7 @@ class DInterface(pl.LightningDataModule):
                           batch_size=self.batch_size, 
                           shuffle=True, 
                           num_workers=self.num_workers,
-                          # collate_fn=self._mixup_collate,
+                          collate_fn=self._mixup_collate,
                           persistent_workers=True,
                           pin_memory=True
                           )
