@@ -33,7 +33,7 @@ def _single_train(args):
         mode="max",
         verbose=True
     )
-    trainer = Trainer(max_epochs=args['epochs'], callbacks=[checkpoint_callback, early_stop_callback],
+    trainer = Trainer(max_epochs=args['epochs'], callbacks=[checkpoint_callback],
                       logger=wandb_logger, devices=1, accelerator='gpu')
     
     trainer.fit(model, datamodule=data_module)
@@ -76,7 +76,7 @@ def _cross_validation_train(args):
         )
         trainer = Trainer(
             max_epochs=args['epochs'],
-            callbacks=[checkpoint_callback, EarlyStopping(monitor="val_acc", patience=20, mode="max")],
+            callbacks=[checkpoint_callback],
             logger=wandb_logger,
             deterministic=True
         )
