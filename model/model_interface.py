@@ -18,13 +18,13 @@ class MInterface(LightningModule):
         
         # 初始化指标
         num_classes = kwargs["class_num"]
+        
+        self.criterion = nn.CrossEntropyLoss()
         metric_args = {
             "task": "multiclass",
             "num_classes": num_classes,
             "average": "macro"  # 可选'micro'/'weighted'
         }
-        
-        self.criterion = nn.CrossEntropyLoss()
         self.train_metrics = nn.ModuleDict({
             "micro_acc": Accuracy(
                 task = "multiclass",
@@ -68,7 +68,9 @@ class MInterface(LightningModule):
             self.model = Model4Classifier(**kwargs)
         if self.hparams.model_name == "ConvNeXt":
             self.model = Model4Classifier(**kwargs)
-
+        if self.hparams.model_name == "VGG":
+            self.model = Model4Classifier(**kwargs)
+        
         if self.hparams.model_name == "AlexNet":
             self.model = AlexNet(num_classes=num_classes)
         if self.hparams.model_name == "DeepDBC":
