@@ -1,130 +1,169 @@
-import argparse
-import numpy as np
+import configargparse
 import torch
+import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
-from datasets import DInterface
-from model import MInterface
-from pytorch_lightning.loggers import WandbLogger
-import pandas as pd
-import wandb
+from pytorch_lightning.loggers import TensorBoardLogger
+
+from datasets.data_interface import DInterface
+from model_interface import MInterface
+
 
 def train(args):
-    if args['k_fold'] > 0:
-        _cross_validation_train(args)
-    else:
-        _single_train(args)
+    # 让 cuDNN 挑最优 Conv 算法
+    torch.backends.cudnn.benchmark = True
 
-# 单独一次训练
-def _single_train(args):
-    wandb.init(project="RealWorldClassification", config=args)
-    wandb_logger = WandbLogger(project="RealWorldClassification", config=args)
-    data_module = DInterface(**args)
-    model = MInterface(**args)
+    # 1. Logger (TensorBoard)
+    tb_logger = TensorBoardLogger(
+        save_dir=args.log_dir,
+        name=args.project_name,
+        version=None
+    )
+
+    # 2. DataModule
+    data_module = DInterface(
+        data_path=args.data_path,
+        source_domain=args.src_domain,
+        target_domain=args.tgt_domain,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        image_size=args.image_size,
+        aug_type=args.aug_type,
+        val_ratio=args.val_ratio,
+        seed=args.seed,
+    )
+    data_module.setup()
+    # 计算 max_iter 并赋值给 args
+    if args.epoch_based_training:
+        # 取源域 train dataset 的样本数，求每 epoch 的 iter 数
+        source_train_size = len(data_module.source_train_dataset)
+        iter_per_epoch = source_train_size // args.batch_size
+        if iter_per_epoch == 0:
+            iter_per_epoch = 1
+        args.max_iter = args.n_epoch * iter_per_epoch
+    else:
+        args.max_iter = args.n_epoch * args.n_iter_per_epoch
+
+    # 3. LightningModule (MInterface)
+    #    将 argparse Namespace 转为 dict，传给 LightningModule
+    hparams = vars(args)
+    model = MInterface(hparams)
+
+    # 4. Callbacks
     checkpoint_callback = ModelCheckpoint(
-        monitor="val_acc", 
-        mode='max', 
-        save_top_k=1, 
-        verbose=True
+        monitor="val_acc",
+        mode="max",
+        save_top_k=1,
+        verbose=True,
+        dirpath=args.checkpoint_dir,
+        filename="best-{epoch:02d}-{val_acc:.4f}"
     )
     early_stop_callback = EarlyStopping(
         monitor="val_acc",
-        patience=20,
+        patience=args.early_stop,
         mode="max",
         verbose=True
     )
-    trainer = Trainer(max_epochs=args['epochs'], callbacks=[checkpoint_callback],
-                      logger=wandb_logger, devices=1, accelerator='gpu')
-    
+
+    # 5. Trainer
+    trainer = Trainer(
+        max_epochs=args.n_epoch,
+        accelerator="gpu" if torch.cuda.is_available() else "cpu",
+        precision=16 if torch.cuda.is_available() else 32,
+        deterministic=False,  # False 让 cudnn.benchmark 有机会加速
+        callbacks=[checkpoint_callback],
+        logger=tb_logger,
+        log_every_n_steps=50,
+        limit_train_batches=args.n_iter_per_epoch if not args.epoch_based_training else 1.0,
+    )
+
+    # 6. Fit
     trainer.fit(model, datamodule=data_module)
-    print("训练完成，自动评估测试集...")
-    model_path = checkpoint_callback.best_model_path
-    if model_path:
-        best_model = MInterface.load_from_checkpoint(model_path)
+
+    # 7. Test：在目标域（若指定）或源域验证集上测试
+    print("训练完成，开始测试 …")
+    best_ckpt = checkpoint_callback.best_model_path
+    if best_ckpt:
+        best_model = MInterface.load_from_checkpoint(best_ckpt)
         trainer.test(best_model, datamodule=data_module)
     else:
-        print("未保存最佳模型，使用当前模型测试...")
+        print("未找到最佳 checkpoint，直接用当前模型做测试 …")
         trainer.test(model, datamodule=data_module)
-    wandb.finish()
 
-# 交叉验证
-def _cross_validation_train(args):
-    fold_results = []
-    for fold in range(args['k_fold']):
-        args["current_fold"] = fold
-        seed_everything(42)
-        wandb.init(
-            project="RealWorldClassification",
-            config=args,
-            group=f"{args['k_fold']}-fold-cv",
-            name=f"fold-{fold+1}"
-        )
-        data_module = DInterface(**args)
-        model = MInterface(**args)
-        # 训练配置
-        checkpoint_callback = ModelCheckpoint(
-            dirpath=f"checkpoints/fold_{fold+1}",
-            monitor="val_acc",
-            mode="max",
-            filename="best-{epoch}-{val_acc:.2f}"
-        )
-        wandb_logger = WandbLogger(
-            project="RealWorldClassification",
-            config=args,
-            group=f"CV-{args['k_fold']}fold",
-            name=f"fold{fold+1}"
-        )
-        trainer = Trainer(
-            max_epochs=args['epochs'],
-            callbacks=[checkpoint_callback],
-            logger=wandb_logger,
-            deterministic=True
-        )
-        
-        # 训练验证
-        trainer.fit(model, datamodule=data_module)
-        model_path = checkpoint_callback.best_model_path
-        best_model = MInterface.load_from_checkpoint(model_path)
-        trainer.test(best_model, datamodule=data_module)
-        fold_results.append(test_result[0]["test_acc"])
-        wandb.finish()
 
-    # 输出结果
-    final_metrics = {
-        "cv_mean_acc": np.mean(fold_results),
-        "cv_std_acc": np.std(fold_results),
-        "cv_details": fold_results
-    }
-    print(f"\n{args['k_fold']}-Fold CV Results:\n{final_metrics}")
+if __name__ == "__main__":
+    parser = configargparse.ArgumentParser(
+        description="Lightning + TransferNet 深度领域自适应示例",
+        config_file_parser_class=configargparse.YAMLConfigFileParser,
+        formatter_class=configargparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add("--config", is_config_file=True, default='DAN/DAN.yaml', help="YAML 配置文件路径")
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--data_path", type=str, default="../autodl-tmp/Real World/", help="Path to image dataset")
-    parser.add_argument("--image_size", type=int, default=224, help="Size of the input image to the model")
-    parser.add_argument("--image_channels", type=int, default=3, help="Number of channels in the input image")
-    parser.add_argument("--class_num", type=int, default=65, help="Dimensionality of the latent space")
-    parser.add_argument('--hidden_dim', type=int, default=512, help='Hidden dimension of the model')
-    parser.add_argument("--batch_size", type=int, default=128, help="Training batch size")
-    parser.add_argument("--num_workers", type=int, default=16, help="Number of workers for data loaders")
-    parser.add_argument("--learning_rate", type=float, default=0.001, help="Learning rate for the optimizer")
-    parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay for the optimizer")
-    parser.add_argument("--lr_scheduler", type=bool, default=True, help="Use learning rate scheduler")
-    
-    parser.add_argument("--epochs", type=int, default=170, help="Number of training epochs")
-    parser.add_argument('--backbone', type=str, default='efficientnetv2_s', help='Backbone model to use')
-    parser.add_argument("--model_name", type=str, default="EfficientNetV2", help="Name of the model to train")
-    
-    parser.add_argument("--mode", type=str, default="train", help="Mode to run the script in: train or predict")
-    parser.add_argument("--k_fold", type=int, default=0, help="Number of folds for k-fold cross-validation")
-    parser.add_argument("--aug_type", type=str, default="default", help="Type of augmentation to use: default or light or strong")
-    parser.add_argument("--mixup_alpha", type=float, default=0.0, help="Mixup/Cutmix的alpha参数（0表示禁用）")
-    parser.add_argument("--cutmix_prob", type=float, default=0.5, help="执行Cutmix的概率（剩余概率使用Mixup）")
-    parser.add_argument("--margin", type=float, default=0.5, help="Margin value for ArcFace (recommended: 0.3-0.7, typical 0.5)")
-    parser.add_argument("--scale", type=int, default=32, help="Scale factor for ArcFace (recommended: 32-128, typical 64)")
-    # parser.add_argument("--checkpoint_path", type=str, default="", help="Path to the model checkpoint for predictions")
+    # —— 通用参数 —— #
+    parser.add_argument("--seed", type=int, default=0, help="随机种子")
+    parser.add_argument("--num_workers", type=int, default=8, help="DataLoader num_workers")
+    parser.add_argument("--devices", type=int, default=1, help="使用的 GPU 数量；>1 时启用 DDP")
+
+    # —— 网络 & 对齐损失 —— #
+    parser.add_argument("--backbone", type=str, default="resnet50", help="骨干网络名称 (resnet50 / ...)")
+    parser.add_argument("--use_bottleneck", default=True, help="是否使用 Bottleneck 层")
+    parser.add_argument("--bottleneck_width", type=int, default=256, help="Bottleneck 层的输出维度")
+    parser.add_argument("--transfer_loss", type=str, default="mmd",
+                        choices=["mmd", "lmmd", "coral", "adv", "daan", "bnm"],
+                        help="选择哪种领域对齐损失")
+
+    # —— 数据 & 域设置 —— #
+    parser.add_argument("--data_path", type=str, default="/root/datasets/OfficeHome",
+                        help="OfficeHome 数据集根目录，包含四个子文件夹：Art, Clipart, Product, RealWorld")
+    parser.add_argument("--src_domain", type=str, default="RealWorld",
+                        choices=["Art", "Clipart", "Product", "RealWorld"],
+                        help="源域子路径名称")
+    parser.add_argument("--tgt_domain", type=str, default="Product",
+                        choices=["Art", "Clipart", "Product", "RealWorld", "None"],
+                        help="目标域子路径名称；若设为 'None' 则只在源域做验证/测试")
+    parser.add_argument("--val_ratio", type=float, default=0.2,
+                        help="源域 train/val 拆分比例 (验证集占比)")
+    parser.add_argument("--class_num", type=int, default=65,
+                        help="分类任务的类别数目；OfficeHome 是 65 类")
+    # —— 训练超参 —— #
+    parser.add_argument("--batch_size", type=int, default=32, help="训练批大小")
+    parser.add_argument("--image_size", type=int, default=224, help="输入图像尺寸")
+    parser.add_argument("--n_epoch", type=int, default=50, help="训练最大轮数")
+    parser.add_argument("--early_stop", type=int, default=0,
+                        help="如果验证集 val_acc 连续若干 epoch 不增则早停；<=0 表示不启用早停")
+    parser.add_argument("--epoch_based_training", type=bool, default=False,
+                        help="是否将每个 epoch 设为 走完一次 DataLoader；否则按 n_iter_per_epoch 定义迭代次数")
+    parser.add_argument("--n_iter_per_epoch", type=int, default=100,
+                        help="若使用 Iteration-based 训练，每个 epoch 的 iteration 数量")
+
+    # —— 优化器 & 学习率调度 —— #
+    parser.add_argument("--lr", type=float, default=1e-3, help="基础学习率")
+    parser.add_argument("--momentum", type=float, default=0.9)
+    parser.add_argument("--weight_decay", type=float, default=5e-4)
+    parser.add_argument("--lr_scheduler", type=bool, default=True, help="是否启用 LR Scheduler")
+    parser.add_argument("--lr_gamma", type=float, default=0.0003, help="LR 衰减中的 gamma 参数")
+    parser.add_argument("--lr_decay", type=float, default=0.75, help="LR 衰减中的 decay 指数")
+
+    # —— 对齐损失权重 —— #
+    parser.add_argument("--transfer_loss_weight", type=float, default=1.0,
+                        help="分类 loss 与 transfer loss 之间的加权比例")
+
+    # —— 增强 & 日志 & 保存路径 —— #
+    parser.add_argument("--aug_type", type=str, default="default",
+                        choices=["default", "light", "strong"],
+                        help="训练阶段的增强策略")
+    parser.add_argument("--log_dir", type=str, default="logs", help="TensorBoard 日志根目录")
+    parser.add_argument("--project_name", type=str, default="OfficeHome_Transfer", help="TensorBoard 子目录名")
+    parser.add_argument("--checkpoint_dir", type=str, default="checkpoints", help="模型 checkpoint 保存目录")
 
     args = parser.parse_args()
-    if args.mode == "train":
-        train(vars(args))
-    else:
-        pass
+
+    # 把字符串 "None" 转成 None
+    if args.tgt_domain == "None":
+        args.tgt_domain = None
+
+    # 设定随机种子
+    seed_everything(args.seed, workers=True)
+
+    # 运行训练
+    train(args)
