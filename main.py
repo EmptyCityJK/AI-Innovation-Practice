@@ -1,26 +1,33 @@
 import configargparse
+import os
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
-from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 
 from datasets.data_interface import DInterface
 from model_interface import MInterface
 
-
 def train(args):
+    os.environ["WANDB_MODE"] = "offline"
     # 让 cuDNN 挑最优 Conv 算法
     torch.backends.cudnn.benchmark = True
 
-    # 1. Logger (TensorBoard)
+    # 1. Logger (TensorBoard + Wandb)
     tb_logger = TensorBoardLogger(
         save_dir=args.log_dir,
         name=args.project_name,
         version=None
     )
+    wandb_logger = WandbLogger(
+        project=args.project_name,
+        name=f"{args.config}{args.src_domain}_to_{args.tgt_domain}" if args.tgt_domain else f"{args.src_domain}_only",
+        save_dir=args.log_dir,
+        config=args,
+    )
 
-    # 2. DataModule
+    # 2. DataModule：把 epoch_based_training 传进去
     data_module = DInterface(
         data_path=args.data_path,
         source_domain=args.src_domain,
@@ -29,27 +36,33 @@ def train(args):
         num_workers=args.num_workers,
         image_size=args.image_size,
         aug_type=args.aug_type,
-        val_ratio=args.val_ratio,
         seed=args.seed,
+        epoch_based=args.epoch_based_training
     )
     data_module.setup()
-    # 计算 max_iter 并赋值给 args
-    if args.epoch_based_training:
-        # 取源域 train dataset 的样本数，求每 epoch 的 iter 数
-        source_train_size = len(data_module.source_train_dataset)
-        iter_per_epoch = source_train_size // args.batch_size
-        if iter_per_epoch == 0:
-            iter_per_epoch = 1
-        args.max_iter = args.n_epoch * iter_per_epoch
-    else:
-        args.max_iter = args.n_epoch * args.n_iter_per_epoch
 
-    # 3. LightningModule (MInterface)
-    #    将 argparse Namespace 转为 dict，传给 LightningModule
+    # 3. 计算 max_iter (给 DAAN 用)
+    source_train_size = len(data_module.source_train_dataset)
+    target_train_size = len(data_module.target_train_dataset) if data_module.target_train_dataset is not None else 0
+    len_source_loader = source_train_size // args.batch_size
+    len_target_loader = target_train_size // args.batch_size
+
+    if args.epoch_based_training:
+        iter_per_epoch = min(len_source_loader, len_target_loader)
+    else:
+        iter_per_epoch = args.n_iter_per_epoch
+
+    if iter_per_epoch == 0:
+        iter_per_epoch = args.n_iter_per_epoch
+
+    args.max_iter = args.n_epoch * iter_per_epoch
+    print(f"len(source_loader)={len_source_loader}, len(target_loader)={len_target_loader}, iter_per_epoch={iter_per_epoch}, max_iter={args.max_iter}")
+
+    # 4. LightningModule
     hparams = vars(args)
     model = MInterface(hparams)
 
-    # 4. Callbacks
+    # 5. Callbacks
     checkpoint_callback = ModelCheckpoint(
         monitor="val_acc",
         mode="max",
@@ -65,22 +78,26 @@ def train(args):
         verbose=True
     )
 
-    # 5. Trainer
+    # 6. Trainer：根据 epoch_based_training 决定 limit_train_batches
+    if args.epoch_based_training:
+        limit_batches = 1.0   # 跑完整个 CombinedLoader（mode="min_size"）
+    else:
+        limit_batches = args.n_iter_per_epoch  # 每轮只跑固定迭代数
+
     trainer = Trainer(
         max_epochs=args.n_epoch,
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
-        precision=16 if torch.cuda.is_available() else 32,
-        deterministic=False,  # False 让 cudnn.benchmark 有机会加速
+        precision='16-mixed',
+        deterministic=False,
         callbacks=[checkpoint_callback],
-        logger=tb_logger,
-        log_every_n_steps=50,
-        limit_train_batches=args.n_iter_per_epoch if not args.epoch_based_training else 1.0,
+        logger=[wandb_logger, tb_logger],
+        limit_train_batches=limit_batches
     )
 
-    # 6. Fit
+    # 7. Fit
     trainer.fit(model, datamodule=data_module)
 
-    # 7. Test：在目标域（若指定）或源域验证集上测试
+    # 8. Test：在目标域（若指定）或源域验证集上测试
     print("训练完成，开始测试 …")
     best_ckpt = checkpoint_callback.best_model_path
     if best_ckpt:
@@ -92,8 +109,9 @@ def train(args):
 
 
 if __name__ == "__main__":
+    torch.set_float32_matmul_precision('medium') 
     parser = configargparse.ArgumentParser(
-        description="Lightning + TransferNet 深度领域自适应示例",
+        description="TransferLearning for OfficeHome Dataset",
         config_file_parser_class=configargparse.YAMLConfigFileParser,
         formatter_class=configargparse.ArgumentDefaultsHelpFormatter
     )
@@ -105,8 +123,8 @@ if __name__ == "__main__":
     parser.add_argument("--devices", type=int, default=1, help="使用的 GPU 数量；>1 时启用 DDP")
 
     # —— 网络 & 对齐损失 —— #
-    parser.add_argument("--backbone", type=str, default="resnet50", help="骨干网络名称 (resnet50 / ...)")
-    parser.add_argument("--use_bottleneck", default=True, help="是否使用 Bottleneck 层")
+    parser.add_argument("--backbone", type=str, default="resnet50", help="骨干网络名称")
+    parser.add_argument("--use_bottleneck", type=bool, default=True, help="是否使用 Bottleneck 层")
     parser.add_argument("--bottleneck_width", type=int, default=256, help="Bottleneck 层的输出维度")
     parser.add_argument("--transfer_loss", type=str, default="mmd",
                         choices=["mmd", "lmmd", "coral", "adv", "daan", "bnm"],
@@ -114,30 +132,29 @@ if __name__ == "__main__":
 
     # —— 数据 & 域设置 —— #
     parser.add_argument("--data_path", type=str, default="/root/datasets/OfficeHome",
-                        help="OfficeHome 数据集根目录，包含四个子文件夹：Art, Clipart, Product, RealWorld")
-    parser.add_argument("--src_domain", type=str, default="RealWorld",
+                        help="OfficeHome 数据集根目录，包含四个子文件夹")
+    parser.add_argument("--src_domain", type=str, default="Art",
                         choices=["Art", "Clipart", "Product", "RealWorld"],
                         help="源域子路径名称")
-    parser.add_argument("--tgt_domain", type=str, default="Product",
+    parser.add_argument("--tgt_domain", type=str, default="Clipart",
                         choices=["Art", "Clipart", "Product", "RealWorld", "None"],
                         help="目标域子路径名称；若设为 'None' 则只在源域做验证/测试")
-    parser.add_argument("--val_ratio", type=float, default=0.2,
-                        help="源域 train/val 拆分比例 (验证集占比)")
     parser.add_argument("--class_num", type=int, default=65,
                         help="分类任务的类别数目；OfficeHome 是 65 类")
+
     # —— 训练超参 —— #
-    parser.add_argument("--batch_size", type=int, default=32, help="训练批大小")
+    parser.add_argument("--batch_size", type=int, default=64, help="训练批大小")
     parser.add_argument("--image_size", type=int, default=224, help="输入图像尺寸")
-    parser.add_argument("--n_epoch", type=int, default=50, help="训练最大轮数")
+    parser.add_argument("--n_epoch", type=int, default=30, help="训练最大轮数")
     parser.add_argument("--early_stop", type=int, default=0,
-                        help="如果验证集 val_acc 连续若干 epoch 不增则早停；<=0 表示不启用早停")
+                        help="如果 val_acc 连续若干 epoch 不增则早停；<=0 表示不启用早停")
     parser.add_argument("--epoch_based_training", type=bool, default=False,
-                        help="是否将每个 epoch 设为 走完一次 DataLoader；否则按 n_iter_per_epoch 定义迭代次数")
-    parser.add_argument("--n_iter_per_epoch", type=int, default=100,
-                        help="若使用 Iteration-based 训练，每个 epoch 的 iteration 数量")
+                        help="True: 一个 epoch 以最短 loader 耗尽为准；False: 每轮只固定 n_iter_per_epoch 次迭代")
+    parser.add_argument("--n_iter_per_epoch", type=int, default=500,
+                        help="当 epoch_based_training=False 时，一个 epoch 的迭代次数")
 
     # —— 优化器 & 学习率调度 —— #
-    parser.add_argument("--lr", type=float, default=1e-3, help="基础学习率")
+    parser.add_argument("--lr", type=float, default=3e-3, help="基础学习率")
     parser.add_argument("--momentum", type=float, default=0.9)
     parser.add_argument("--weight_decay", type=float, default=5e-4)
     parser.add_argument("--lr_scheduler", type=bool, default=True, help="是否启用 LR Scheduler")
@@ -153,7 +170,7 @@ if __name__ == "__main__":
                         choices=["default", "light", "strong"],
                         help="训练阶段的增强策略")
     parser.add_argument("--log_dir", type=str, default="logs", help="TensorBoard 日志根目录")
-    parser.add_argument("--project_name", type=str, default="OfficeHome_Transfer", help="TensorBoard 子目录名")
+    parser.add_argument("--project_name", type=str, default="OfficeHome_Transfer", help="Project 名称")
     parser.add_argument("--checkpoint_dir", type=str, default="checkpoints", help="模型 checkpoint 保存目录")
 
     args = parser.parse_args()

@@ -1,6 +1,6 @@
 import torch.nn as nn
 from torchvision import models
-
+from torchvision.models import ResNet50_Weights
 resnet_dict = {
     "resnet18": models.resnet18,
     "resnet34": models.resnet34,
@@ -59,7 +59,7 @@ class AlexNetBackbone(nn.Module):
 class ResNetBackbone(nn.Module):
     def __init__(self, network_type):
         super(ResNetBackbone, self).__init__()
-        resnet = resnet_dict[network_type](pretrained=True)
+        resnet = resnet_dict[network_type](weights=ResNet50_Weights.IMAGENET1K_V1)
         self.conv1 = resnet.conv1
         self.bn1 = resnet.bn1
         self.relu = resnet.relu
